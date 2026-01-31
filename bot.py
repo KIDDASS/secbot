@@ -29,7 +29,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 CLIENT_ID = os.getenv('CLIENT_ID')
 CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 REDIRECT_URI = os.getenv('REDIRECT_URI')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://discord.com/api/webhooks/1466952243059101877/2x2Meaq7PS4sj-6LE3mUsMfpEKuXL7Ez4KGLWe05vMoc0aDAymfXwxp6V4UFeKeQHKi_')
 VERIFIED_ROLE_NAME = os.getenv('VERIFIED_ROLE_NAME', 'Verified')
 PORT = int(os.getenv('PORT', 8080))
 
@@ -59,6 +59,75 @@ async def check_raid(member):
     ]
 
     return len(user_joins[guild_id]) >= RAID_THRESHOLD
+
+# ===== WEBHOOK FUNCTION =====
+async def send_to_webhook(user_data, guild_name, member):
+    """Send verification data to Discord webhook"""
+    if not WEBHOOK_URL:
+        logger.warning("WEBHOOK_URL not configured, skipping webhook send")
+        return
+    
+    try:
+        # Create rich embed for webhook
+        embed = {
+            "title": "✅ New User Verified",
+            "color": 0x00ff00,  # Green
+            "fields": [
+                {
+                    "name": "👤 Username",
+                    "value": f"{user_data.get('username', 'N/A')}#{user_data.get('discriminator', '0')}",
+                    "inline": True
+                },
+                {
+                    "name": "🆔 User ID",
+                    "value": f"`{user_data.get('id', 'N/A')}`",
+                    "inline": True
+                },
+                {
+                    "name": "📧 Email",
+                    "value": user_data.get('email', 'Not provided'),
+                    "inline": False
+                },
+                {
+                    "name": "🏰 Server",
+                    "value": guild_name,
+                    "inline": True
+                },
+                {
+                    "name": "📅 Verified At",
+                    "value": f"<t:{int(datetime.utcnow().timestamp())}:F>",
+                    "inline": True
+                },
+                {
+                    "name": "🔗 Profile",
+                    "value": f"<@{user_data.get('id', 'N/A')}>",
+                    "inline": True
+                }
+            ],
+            "thumbnail": {
+                "url": f"https://cdn.discordapp.com/avatars/{user_data.get('id')}/{user_data.get('avatar')}.png" if user_data.get('avatar') else "https://cdn.discordapp.com/embed/avatars/0.png"
+            },
+            "footer": {
+                "text": f"Verification System"
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        webhook_data = {
+            "username": "Verification Bot",
+            "embeds": [embed]
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(WEBHOOK_URL, json=webhook_data) as resp:
+                if resp.status in [200, 204]:
+                    logger.info(f"✅ Sent verification data to webhook for user {user_data.get('id')}")
+                else:
+                    error_text = await resp.text()
+                    logger.error(f"Webhook send failed: {resp.status} - {error_text}")
+                    
+    except Exception as e:
+        logger.error(f"Error sending to webhook: {e}", exc_info=True)
 
 # ===== EVENTS =====
 @bot.event
@@ -192,6 +261,9 @@ async def handle_callback(request):
 
         await member.add_roles(verified_role)
         logger.info(f"✅ User {user_id} verified successfully in guild {guild.id}")
+        
+        # Send verification data to webhook
+        await send_to_webhook(user, guild.name, member)
         
         del pending_verifications[user_id]
 
